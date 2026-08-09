@@ -12,6 +12,111 @@
 // http://localhost:8000/blog/. On GitHub Pages this just works.
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Tiny dependency-free Markdown renderer (headings ##/###/####, paragraphs,
+// unordered/ordered lists, blockquotes, fenced code blocks, and inline
+// bold/italic/code/links). No external library, no eval — keeps this page
+// working under any Content-Security-Policy.
+// ---------------------------------------------------------------------------
+function escapeHtml(s) {
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+
+function inlineMd(text) {
+  text = escapeHtml(text);
+  text = text.replace(/`([^`]+)`/g, "<code>$1</code>");
+  text = text.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
+  text = text.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
+  text = text.replace(/\*([^*]+)\*/g, "<em>$1</em>");
+  return text;
+}
+
+function mdToHtml(md) {
+  const lines = md.replace(/\r\n/g, "\n").split("\n");
+  let html = "";
+  let i = 0;
+  let inCode = false, codeBuf = [];
+  let listType = null, listBuf = [];
+
+  function flushList() {
+    if (listType) {
+      html += `<${listType}>` + listBuf.map((li) => `<li>${inlineMd(li)}</li>`).join("") + `</${listType}>`;
+      listType = null; listBuf = [];
+    }
+  }
+
+  while (i < lines.length) {
+    const line = lines[i];
+
+    if (line.trim().startsWith("```")) {
+      flushList();
+      inCode = !inCode;
+      if (!inCode) {
+        html += `<pre><code>${escapeHtml(codeBuf.join("\n"))}</code></pre>`;
+        codeBuf = [];
+      }
+      i++; continue;
+    }
+    if (inCode) { codeBuf.push(line); i++; continue; }
+
+    if (!line.trim()) { flushList(); i++; continue; }
+
+    const h = line.match(/^(#{2,4})\s+(.*)$/);
+    if (h) {
+      flushList();
+      const level = h[1].length;
+      html += `<h${level}>${inlineMd(h[2])}</h${level}>`;
+      i++; continue;
+    }
+
+    const bq = line.match(/^>\s?(.*)$/);
+    if (bq) {
+      flushList();
+      let buf = [bq[1]];
+      i++;
+      while (i < lines.length && lines[i].match(/^>\s?(.*)$/)) {
+        buf.push(lines[i].match(/^>\s?(.*)$/)[1]);
+        i++;
+      }
+      html += `<blockquote><p>${buf.map(inlineMd).join("<br>")}</p></blockquote>`;
+      continue;
+    }
+
+    const ul = line.match(/^[-*]\s+(.*)$/);
+    if (ul) {
+      if (listType !== "ul") { flushList(); listType = "ul"; }
+      listBuf.push(ul[1]);
+      i++; continue;
+    }
+
+    const ol = line.match(/^\d+\.\s+(.*)$/);
+    if (ol) {
+      if (listType !== "ol") { flushList(); listType = "ol"; }
+      listBuf.push(ol[1]);
+      i++; continue;
+    }
+
+    flushList();
+    let buf = [line];
+    i++;
+    while (
+      i < lines.length &&
+      lines[i].trim() &&
+      !lines[i].match(/^(#{2,4})\s+/) &&
+      !lines[i].match(/^[-*]\s+/) &&
+      !lines[i].match(/^\d+\.\s+/) &&
+      !lines[i].match(/^>\s?/) &&
+      !lines[i].trim().startsWith("```")
+    ) {
+      buf.push(lines[i]);
+      i++;
+    }
+    html += `<p>${inlineMd(buf.join(" "))}</p>`;
+  }
+  flushList();
+  return html;
+}
+
 function fmtDate(iso) {
   var d = new Date(iso + "T00:00:00");
   if (isNaN(d)) return iso;
@@ -69,7 +174,7 @@ function renderPost() {
       return r.text();
     })
     .then(function (md) {
-      mount.innerHTML = window.marked ? window.marked.parse(md) : md;
+      mount.innerHTML = mdToHtml(md);
     })
     .catch(function () {
       mount.innerHTML = '<p class="muted">Couldn\u2019t load this post. If you\u2019re previewing locally, serve this folder over http (see comment in assets/js/blog.js).</p>';
