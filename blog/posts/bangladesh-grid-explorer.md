@@ -1,5 +1,3 @@
-# Bangladesh Grid Explorer
-
 Spent the past few hours turning Bangladesh's daily power grid reports into something people can actually explore.
 
 PGCB publishes a daily report on the national grid. All real, all public.
